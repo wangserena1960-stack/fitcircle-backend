@@ -2,8 +2,8 @@ name = "fitcircle-api"
 main = "worker.js"
 compatibility_date = "2024-11-25"
 
-# 這一段是把 Cloudflare D1 綁進 Worker 裡
+# 將 Cloudflare D1 綁到 Worker 的 env.DB
 [[d1_databases]]
-binding = "DB"                 # 程式裡用 env.DB 就是這個
-database_name = "fitcircle-db"
-database_id = "82210a27-7229-47ca-9b2a-dd208d8d25eaD1 ID"
+binding = "DB"                          # 程式裡用 env.DB
+database_name = "fitcircle-db"          # 你的 D1 名稱
+database_id = "82210a27-7229-47ca-9b2a-dd208d8d25ea"
