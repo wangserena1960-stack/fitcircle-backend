@@ -1,4 +1,8 @@
-// worker.js － FitCircle API（簡化登入版）
+// worker.js － FitCircle API（LOGIN DEBUG 版）
+
+// 這兩個是 demo 帳號（跟前端顯示的一樣）
+const DEMO_EMAIL = "owner@fitcircle.dev";
+const DEMO_PASSWORD = "fitcircle123";
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -22,8 +26,7 @@ function plainResponse(text, status = 200) {
   });
 }
 
-function handleOptions(request) {
-  // CORS Preflight
+function handleOptions() {
   return new Response(null, {
     status: 204,
     headers: {
@@ -40,17 +43,16 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    // CORS 預檢
     if (request.method === "OPTIONS") {
-      return handleOptions(request);
+      return handleOptions();
     }
 
-    // ---- 0. 根路徑健康檢查 ----
+    // ===== 0. 根路徑：顯示版本字串（用來確認是不是最新的 Worker） =====
     if (!pathname.startsWith("/api")) {
-      return plainResponse("FitCircle API is running");
+      return plainResponse("FitCircle API LOGIN-DEBUG v2025-11-30");
     }
 
-    // 解析 body（若有）
+    // 嘗試解析 JSON body（POST 才需要）
     let body = {};
     if (request.method === "POST") {
       try {
@@ -60,14 +62,25 @@ export default {
       }
     }
 
-    // ---- 1. 登入（簡化版：只檢查固定帳號密碼，不碰 DB）----
+    // ===== 1. GET /api/login-debug?email=...&password=... =====
+    // 用瀏覽器就可以直接測試 login 判斷邏輯
+    if (pathname === "/api/login-debug" && request.method === "GET") {
+      const email = (url.searchParams.get("email") || "").trim();
+      const password = (url.searchParams.get("password") || "").trim();
+      const matchDemo = email === DEMO_EMAIL && password === DEMO_PASSWORD;
+      return jsonResponse({
+        email,
+        password,
+        matchDemo,
+        demoEmail: DEMO_EMAIL,
+        demoPassword: DEMO_PASSWORD,
+      });
+    }
+
+    // ===== 2. POST /api/login  真正登入（先不碰 DB，純比對 demo 帳號） =====
     if (pathname === "/api/login" && request.method === "POST") {
       const email = (body.email || "").trim();
       const password = (body.password || "").trim();
-
-      // 硬編寫 Demo 帳號
-      const DEMO_EMAIL = "owner@fitcircle.dev";
-      const DEMO_PASSWORD = "fitcircle123";
 
       if (email === DEMO_EMAIL && password === DEMO_PASSWORD) {
         const token = `demo-token-${Date.now()}`;
@@ -81,17 +94,14 @@ export default {
           },
         });
       } else {
-        return jsonResponse(
-          { error: "Invalid email or password" },
-          401
-        );
+        return jsonResponse({ error: "Invalid email or password" }, 401);
       }
     }
 
-    // 從這裡開始才會用到 env.DB
+    // ====== 從這裡開始才會使用 D1 Database ======
     const db = env.DB;
 
-    // ---- 2. Admin Overview ----
+    // ---- Admin Overview ----
     if (pathname === "/api/admin/overview" && request.method === "GET") {
       try {
         const coachesRow = await db
@@ -127,7 +137,7 @@ export default {
       }
     }
 
-    // ---- 3. Admin Coaches ----
+    // ---- Admin Coaches ----
     if (pathname === "/api/admin/coaches" && request.method === "GET") {
       try {
         const { results } = await db
@@ -166,7 +176,7 @@ export default {
       }
     }
 
-    // ---- 4. Admin Students ----
+    // ---- Admin Students ----
     if (pathname === "/api/admin/students" && request.method === "GET") {
       try {
         const { results } = await db
@@ -205,7 +215,7 @@ export default {
       }
     }
 
-    // ---- 5. Classes ----
+    // ---- Classes ----
     if (pathname === "/api/classes" && request.method === "GET") {
       try {
         const { results } = await db
@@ -282,7 +292,7 @@ export default {
       }
     }
 
-    // ---- 6. Payments ----
+    // ---- Payments (/api/students/:id/payments) ----
     if (
       pathname.startsWith("/api/students/") &&
       pathname.endsWith("/payments")
@@ -347,7 +357,7 @@ export default {
       }
     }
 
-    // ---- 7. Leave Requests ----
+    // ---- Leave Requests ----
     if (pathname === "/api/leave-requests" && request.method === "GET") {
       try {
         const status = url.searchParams.get("status") || "pending";
@@ -421,7 +431,6 @@ export default {
       }
     }
 
-    // /api/leave-requests/:id/decision
     if (
       pathname.startsWith("/api/leave-requests/") &&
       pathname.endsWith("/decision") &&
