@@ -1,40 +1,59 @@
-// FitCircle API - Worker v2
-// - 正式登入 API: POST /api/login （查 admins 表）
-// - Demo 登入:      GET  /api/login-debug
-// - Dashboard 總覽: GET  /api/admin/overview
-// - 已啟用簡單 CORS（方便 Pages 前端呼叫）
+// FitCircle API - Worker v3
+// - 正式登入:        POST /api/login
+// - Demo 登入:        GET  /api/login-debug
+// - Dashboard 總覽:   GET  /api/admin/overview
+// - 教練管理 CRUD:   GET/POST/PUT/DELETE /api/coaches[...]
 
-const ALLOWED_ORIGIN = "*"; // 你日後想鎖網域，可改成 "https://fitcircle-frontend.pages.dev"
+const ALLOWED_ORIGIN = "*"; // 之後可改成 "https://fitcircle-frontend.pages.dev"
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    // CORS 預檢請求
+    // CORS 預檢
     if (request.method === "OPTIONS") {
       return handleOptions(request);
     }
 
     try {
-      // 健康檢查首頁
+      // 健康檢查
       if (pathname === "/" && request.method === "GET") {
-        return textResponse("FitCircle API WORKER v2 (login, overview)");
+        return textResponse("FitCircle API WORKER v3 (login, overview, coaches)");
       }
 
-      // Demo 登入：仍保留方便除錯
+      // Demo 登入
       if (pathname === "/api/login-debug" && request.method === "GET") {
         return handleLoginDebug(url);
       }
 
-      // ✅ 正式登入：POST /api/login
+      // 正式登入
       if (pathname === "/api/login" && request.method === "POST") {
         return handleLogin(request, env);
       }
 
-      // Dashboard 總覽：GET /api/admin/overview
+      // Dashboard 總覽
       if (pathname === "/api/admin/overview" && request.method === "GET") {
         return handleAdminOverview(env);
+      }
+
+      // 教練管理
+      if (pathname === "/api/coaches" && request.method === "GET") {
+        return handleGetCoaches(env);
+      }
+      if (pathname === "/api/coaches" && request.method === "POST") {
+        return handleCreateCoach(request, env);
+      }
+      if (pathname.startsWith("/api/coaches/")) {
+        const id = pathname.split("/")[3]; // /api/coaches/:id
+        if (!id) return jsonResponse({ error: "Coach id is required" }, 400);
+
+        if (request.method === "PUT") {
+          return handleUpdateCoach(request, env, id);
+        }
+        if (request.method === "DELETE") {
+          return handleDeleteCoach(env, id);
+        }
       }
 
       return jsonResponse({ error: "Not found" }, 404);
@@ -128,7 +147,6 @@ function handleLoginDebug(url) {
 /* ---------------- Handler: 正式登入 ---------------- */
 // POST /api/login
 // Body: { email, password }
-// 會查 admins 表，找到就回傳 admin 資料；找不到回 401
 
 async function handleLogin(request, env) {
   let body;
@@ -148,7 +166,6 @@ async function handleLogin(request, env) {
     );
   }
 
-  // D1: admins(email TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT, created_at TEXT)
   let admin;
   try {
     const stmt = env.DB.prepare(
@@ -162,15 +179,13 @@ async function handleLogin(request, env) {
   }
 
   if (!admin) {
-    // 查無此人或密碼錯誤
     return jsonResponse(
       { success: false, error: "帳號或密碼錯誤" },
       401
     );
   }
 
-  // 這裡可以之後再加 JWT / session，目前先回傳簡單 token
-  const token = "demo-static-token"; // 之後可改成真正簽發的 token
+  const token = "demo-static-token"; // 之後可改 JWT
 
   return jsonResponse({
     success: true,
@@ -180,8 +195,6 @@ async function handleLogin(request, env) {
 }
 
 /* ---------------- Handler: Dashboard 總覽 ---------------- */
-// GET /api/admin/overview
-// 目前只簡單計數，未做權限驗證（之後可加 token 驗證）
 
 async function handleAdminOverview(env) {
   const result = {
@@ -193,7 +206,6 @@ async function handleAdminOverview(env) {
   };
 
   try {
-    // 教練數
     const rowCoaches = await env.DB.prepare(
       "SELECT COUNT(*) AS c FROM coaches"
     ).first();
@@ -205,7 +217,6 @@ async function handleAdminOverview(env) {
   }
 
   try {
-    // 學生數
     const rowStudents = await env.DB.prepare(
       "SELECT COUNT(*) AS c FROM students"
     ).first();
@@ -217,7 +228,6 @@ async function handleAdminOverview(env) {
   }
 
   try {
-    // 課程數
     const rowClasses = await env.DB.prepare(
       "SELECT COUNT(*) AS c FROM classes"
     ).first();
@@ -229,7 +239,6 @@ async function handleAdminOverview(env) {
   }
 
   try {
-    // 待處理請假（status = 'pending'）
     const rowPending = await env.DB.prepare(
       "SELECT COUNT(*) AS c FROM leave_requests WHERE status = 'pending'"
     ).first();
@@ -241,7 +250,6 @@ async function handleAdminOverview(env) {
   }
 
   try {
-    // 已記錄付款總額
     const rowPayments = await env.DB.prepare(
       "SELECT COALESCE(SUM(amount), 0) AS total FROM payments"
     ).first();
@@ -253,4 +261,127 @@ async function handleAdminOverview(env) {
   }
 
   return jsonResponse(result);
+}
+
+/* ---------------- Handler: 教練管理 ---------------- */
+
+/**
+ * GET /api/coaches
+ * 回傳所有教練（包含 is_active 欄位）
+ */
+async function handleGetCoaches(env) {
+  try {
+    const stmt = env.DB.prepare(
+      "SELECT id, name, email, phone, notes, is_active, created_at FROM coaches ORDER BY created_at DESC"
+    );
+    const rows = await stmt.all();
+    // D1 .all() 回傳 { results: [...] }
+    const list = rows?.results || rows || [];
+    return jsonResponse(list);
+  } catch (err) {
+    console.error("Error fetching coaches:", err);
+    return jsonResponse({ error: "取得教練列表失敗" }, 500);
+  }
+}
+
+/**
+ * POST /api/coaches
+ * Body: { name, email?, phone?, notes? }
+ */
+async function handleCreateCoach(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON body" }, 400);
+  }
+
+  const name = (body.name || "").trim();
+  const email = (body.email || "").trim();
+  const phone = (body.phone || "").trim();
+  const notes = (body.notes || "").trim();
+
+  if (!name) {
+    return jsonResponse({ error: "教練名稱為必填" }, 400);
+  }
+
+  try {
+    const stmt = env.DB.prepare(
+      "INSERT INTO coaches (name, email, phone, notes, is_active, created_at) VALUES (?, ?, ?, ?, 1, datetime('now'))"
+    ).bind(name, email, phone, notes);
+
+    const info = await stmt.run();
+    const id = info.lastRowId || info.last_insert_rowid || null;
+
+    return jsonResponse({
+      success: true,
+      id,
+    }, 201);
+  } catch (err) {
+    console.error("Error creating coach:", err);
+    return jsonResponse({ error: "新增教練失敗" }, 500);
+  }
+}
+
+/**
+ * PUT /api/coaches/:id
+ * Body: { name?, email?, phone?, notes?, is_active? }
+ */
+async function handleUpdateCoach(request, env, id) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON body" }, 400);
+  }
+
+  const fields = [];
+  const values = [];
+
+  function addField(column, value) {
+    fields.push(`${column} = ?`);
+    values.push(value);
+  }
+
+  if (typeof body.name === "string") addField("name", body.name.trim());
+  if (typeof body.email === "string") addField("email", body.email.trim());
+  if (typeof body.phone === "string") addField("phone", body.phone.trim());
+  if (typeof body.notes === "string") addField("notes", body.notes.trim());
+  if (typeof body.is_active !== "undefined") {
+    addField("is_active", body.is_active ? 1 : 0);
+  }
+
+  if (fields.length === 0) {
+    return jsonResponse({ error: "沒有任何可更新的欄位" }, 400);
+  }
+
+  values.push(id);
+
+  const sql = `UPDATE coaches SET ${fields.join(", ")} WHERE id = ?`;
+
+  try {
+    const stmt = env.DB.prepare(sql).bind(...values);
+    await stmt.run();
+    return jsonResponse({ success: true });
+  } catch (err) {
+    console.error("Error updating coach:", err);
+    return jsonResponse({ error: "更新教練失敗" }, 500);
+  }
+}
+
+/**
+ * DELETE /api/coaches/:id
+ * 目前做「真正刪除」，之後若要軟刪除可改成 is_active = 0
+ */
+async function handleDeleteCoach(env, id) {
+  try {
+    const stmt = env.DB.prepare(
+      "DELETE FROM coaches WHERE id = ?"
+    ).bind(id);
+    await stmt.run();
+    return jsonResponse({ success: true });
+  } catch (err) {
+    console.error("Error deleting coach:", err);
+    return jsonResponse({ error: "刪除教練失敗" }, 500);
+  }
 }
